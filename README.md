@@ -346,199 +346,57 @@ except Exception as e:
 
 ### Django Integration 🎯
 
-LiteLLM2 works seamlessly with Django through `drf-pydantic`:
+LiteLLM2 works seamlessly with Django through `drf-pydantic`. Here's a simple example:
 
 ```python
-from rest_framework import serializers
-from django.db import models
-from litellm2 import Request, LiteLLMClient
-from drf_pydantic import BaseModel  # Use drf_pydantic.BaseModel for Django
-from pydantic import Field
-from typing import List, Optional
-
-# Define Pydantic model using drf_pydantic.BaseModel
-class CustomAnswer(BaseModel):
-    content: str = Field(..., description="The main content")
-    keywords: List[str] = Field(default_factory=list, description="Keywords extracted")
-    sentiment: Optional[str] = Field(None, description="Sentiment analysis")
-
-# Example Django model
-class AIResponse(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    prompt = models.TextField()
-
-# Example serializer
-class CustomAnswerSerializer(serializers.ModelSerializer):
-    """Serializer for the CustomAnswer model."""
-    answer = CustomAnswer.drf_serializer()  # Special method from drf_pydantic
-
-    class Meta:
-        model = AIResponse
-        fields = ['prompt', 'answer', 'created_at']
-```
-
-#### Complete Django View Example
-
-Here's a complete example showing how to use LiteLLM2 in a Django view and return the results through a serializer:
-
-```python
-# In models.py
-from django.db import models
-
-class FeedbackAnalysis(models.Model):
-    feedback = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    # Store metadata about the analysis
-    model_used = models.CharField(max_length=100)
-    response_time = models.FloatField()
-    token_count = models.IntegerField(default=0)
-
-# In serializers.py
+# In views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework import serializers
 from drf_pydantic import BaseModel
 from pydantic import Field
 from typing import List
-
-# Pydantic model for LLM response
-class FeedbackInsights(BaseModel):
-    summary: str = Field(..., description="Summary of the feedback")
-    sentiment: str = Field(..., description="Detected sentiment (positive/negative/neutral)")
-    key_points: List[str] = Field(..., description="Key points from the feedback")
-    improvement_suggestions: List[str] = Field(default_factory=list,
-                                            description="Suggestions for improvement")
-
-# Request serializer
-class FeedbackRequestSerializer(serializers.Serializer):
-    feedback = serializers.CharField(help_text="Customer feedback to analyze")
-
-# Response serializer with LLM output
-class FeedbackResponseSerializer(serializers.Serializer):
-    request_id = serializers.UUIDField()
-    created_at = serializers.DateTimeField()
-    model_used = serializers.CharField()
-
-    # These fields will be populated from the LLM response
-    summary = serializers.CharField()
-    sentiment = serializers.CharField()
-    key_points = serializers.ListField(child=serializers.CharField())
-    improvement_suggestions = serializers.ListField(child=serializers.CharField())
-
-    # Metadata about the request
-    response_time = serializers.FloatField()
-    token_count = serializers.IntegerField()
-
-# In views.py
-import uuid
-from django.utils import timezone
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
 from litellm2 import Request, LiteLLMClient
-from .models import FeedbackAnalysis
-from .serializers import (FeedbackRequestSerializer,
-                         FeedbackResponseSerializer,
-                         FeedbackInsights)
 
-class FeedbackAnalysisView(APIView):
-    """
-    API endpoint for analyzing customer feedback using LiteLLM2.
-    """
+# Define Pydantic model for structured responses
+class FeedbackAnalysis(BaseModel):
+    summary: str = Field(..., description="Summary of the feedback")
+    sentiment: str = Field(..., description="Detected sentiment")
+    key_points: List[str] = Field(..., description="Key points from the feedback")
 
+# Create a serializer using the Pydantic model
+class FeedbackResponseSerializer(serializers.Serializer):
+    answer = FeedbackAnalysis.drf_serializer()
+
+class FeedbackView(APIView):
     def post(self, request):
-        # Validate request
-        serializer = FeedbackRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        feedback = request.data.get('feedback', '')
 
-        # Extract feedback from validated data
-        feedback = serializer.validated_data['feedback']
+        # Initialize LiteLLM client with our response model
+        client = LiteLLMClient(Request(
+            model="openrouter/openai/gpt-4o-mini",
+            temperature=0.3,
+            answer_model=FeedbackAnalysis  # Our pydantic model
+        ))
 
-        try:
-            # Initialize LiteLLM client with our custom response model
-            client = LiteLLMClient(Request(
-                model="openrouter/openai/gpt-4o-mini",
-                temperature=0.3,  # Lower temperature for more factual analysis
-                answer_model=FeedbackInsights  # Our pydantic model
-            ))
+        # Add messages
+        client.msg.add_message_system("You are a feedback analysis expert.")
+        client.msg.add_message_user(feedback)
 
-            # Add messages to the client
-            client.msg.add_message_system(
-                "You are an expert in analyzing customer feedback. "
-                "Extract key insights, determine sentiment, and suggest improvements."
-            )
-            client.msg.add_message_user(feedback)
+        # Generate structured response
+        response: FeedbackAnalysis = client.generate_response()
 
-            # Generate response from LLM
-            llm_response = client.generate_response()
+        # Serialize the response data
+        serializer = FeedbackResponseSerializer(data={
+            "answer": response.model_dump()
+        })
+        serializer.is_valid(raise_exception=True)
 
-            # Create a record in the database
-            request_id = uuid.uuid4()
-            timestamp = timezone.now()
-
-            # Store the analysis in the database
-            analysis = FeedbackAnalysis.objects.create(
-                feedback=feedback,
-                model_used=client.meta.model_used,
-                response_time=client.meta.response_time_seconds,
-                token_count=client.meta.token_count.total_tokens
-            )
-
-            # Prepare response data
-            response_data = {
-                'request_id': request_id,
-                'created_at': timestamp,
-                'model_used': client.meta.model_used,
-
-                # LLM response fields
-                'summary': llm_response.summary,
-                'sentiment': llm_response.sentiment,
-                'key_points': llm_response.key_points,
-                'improvement_suggestions': llm_response.improvement_suggestions,
-
-                # Metadata
-                'response_time': client.meta.response_time_seconds,
-                'token_count': client.meta.token_count.total_tokens
-            }
-
-            # Serialize the response
-            response_serializer = FeedbackResponseSerializer(data=response_data)
-            response_serializer.is_valid(raise_exception=True)
-
-            return Response(response_serializer.data, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response(
-                {'error': f'Analysis failed: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-# In urls.py
-from django.urls import path
-from .views import FeedbackAnalysisView
-
-urlpatterns = [
-    path('analyze-feedback/', FeedbackAnalysisView.as_view(), name='analyze-feedback'),
-]
+        # Return the serialized data
+        return Response(serializer.data)
 ```
 
-This example demonstrates:
-
-1. A Pydantic model (`FeedbackInsights`) for structuring the LLM response
-2. Django serializers for request validation and response formatting
-3. A Django model for storing analysis results
-4. A complete APIView that:
-   - Validates the incoming request
-   - Sends the feedback to LiteLLM2 for analysis
-   - Stores the results in the database
-   - Returns a structured API response
-
-You can test this endpoint with:
-
-```bash
-curl -X POST http://localhost:8000/api/analyze-feedback/ \
-     -H "Content-Type: application/json" \
-     -d '{"feedback": "The product is great but the customer service could be improved."}'
-```
+That's it! This example shows how to properly integrate with Django REST framework's serializers using the `drf_serializer()` method, which gives you full validation, schema generation, and browsable API support.
 
 ---
 
