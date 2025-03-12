@@ -1,0 +1,11 @@
+{
+    "name": "@root/default",
+    "private": true,
+    "scripts": {
+        "commit": "npx openrouter-commit -run",
+        "commit2": "git add . && git commit -m 'fixes' && git push"
+    },
+    "devDependencies": {
+        "openrouter-commit": "latest"
+    }
+}
