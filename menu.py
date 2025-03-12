@@ -40,8 +40,10 @@ class DeployManager:
             },
             "Package Management": {
                 "Build Package": self.build_package,
-                f"Upload to TestPyPI (v{self.current_version})": self.upload_to_testpypi,
-                f"Upload to PyPI (v{self.current_version})": self.upload_to_pypi,
+                f"Upload to TestPyPI (v{self.current_version})":
+                    self.upload_to_testpypi,
+                f"Upload to PyPI (v{self.current_version})":
+                    self.upload_to_pypi,
                 "Clean Builds": self.clean_builds,
             },
         }
@@ -49,7 +51,7 @@ class DeployManager:
     def _get_package_name(self) -> str:
         """Get package name from setup.cfg."""
         setup_cfg = self.root_dir / "setup.cfg"
-        
+
         with open(setup_cfg) as f:
             for line in f:
                 if line.startswith("name = "):
@@ -167,7 +169,15 @@ class DeployManager:
         ).ask():
             return False
 
-        self.build_package()
+        print("\n🧪 Running tests before uploading to TestPyPI...")
+        if not self.run_tests():
+            print("❌ Tests failed! Aborting upload to TestPyPI.")
+            return False
+
+        print("\n🔨 Tests passed! Building package...")
+        if not self.build_package():
+            print("❌ Package build failed! Aborting upload to TestPyPI.")
+            return False
 
         return self.run_command(
             "twine upload --repository testpypi dist/*", "Uploading to TestPyPI"
@@ -178,7 +188,15 @@ class DeployManager:
         if not questionary.confirm("Are you sure you want to upload to PyPI?").ask():
             return False
 
-        self.build_package()
+        print("\n🧪 Running tests before uploading to PyPI...")
+        if not self.run_tests():
+            print("❌ Tests failed! Aborting upload to PyPI.")
+            return False
+
+        print("\n🔨 Tests passed! Building package...")
+        if not self.build_package():
+            print("❌ Package build failed! Aborting upload to PyPI.")
+            return False
 
         return self.run_command("twine upload dist/*", "Uploading to PyPI")
 

@@ -4,9 +4,7 @@ Simple Agent - A lightweight implementation of an AI agent with tools
 
 import logging
 from typing import Callable, List
-
-# Импортируем только нужные компоненты
-from smolagents import LiteLLMModel, ToolCallingAgent, GradioUI
+from smolagents import LiteLLMModel, ToolCallingAgent, GradioUI as OriginalGradioUI
 
 # Configure logging
 logging.basicConfig(
@@ -14,6 +12,21 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# Custom GradioUI class to handle None values
+class GradioUI(OriginalGradioUI):
+    """A wrapper around smolagents GradioUI that handles None values properly"""
+
+    def __init__(self, agent, file_upload_folder=None):
+        # Make sure name and description are strings, not None
+        if not hasattr(agent, 'name') or agent.name is None:
+            agent.name = "Agent"
+        if not hasattr(agent, 'description') or agent.description is None:
+            agent.description = ""
+
+        # Call the parent constructor
+        super().__init__(agent, file_upload_folder)
 
 
 class SimpleAgent:
@@ -33,6 +46,9 @@ class SimpleAgent:
         self.model_id = model_id or "openrouter/openai/gpt-4o-mini"
         self.tools = []
         self.llm_agent = None
+        # Add name and description attributes for Gradio UI
+        self.name = "Simple Agent"
+        self.description = "A lightweight AI agent that can execute various tools based on user queries."
 
     def add_tools(self, tools: List[Callable]) -> None:
         """
@@ -113,6 +129,7 @@ class SimpleAgent:
 
         try:
             print(f"Launching Gradio UI with {len(self.tools)} tools")
+            # Use our custom GradioUI class that handles None values
             GradioUI(self.llm_agent).launch(
                 server_name=server_name,
                 server_port=server_port,

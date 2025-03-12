@@ -243,6 +243,10 @@ class AdvancedAgent(SimpleAgent):
         """
         Run a demonstration of the agent with its tools
         """
+        # Add name and description attributes
+        self.name = "Advanced Agent"
+        self.description = "An AI agent with various tools for data manipulation, math operations, and more."
+
         # Launch Gradio UI
         self.launch_gradio_ui()
 
