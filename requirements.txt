@@ -16,3 +16,4 @@ smolagents
 smolagents[gradio]
 colorlog
 drf-pydantic
+pyyaml

@@ -1,8 +1,11 @@
 import time
-import os
-from typing import TypeVar, Type
+from typing import TypeVar, Type, Any, Tuple
+import json
 from litellm import completion
-from litellm.exceptions import RateLimitError, Timeout, APIConnectionError, BudgetExceededError, AuthenticationError
+from litellm.exceptions import (
+    RateLimitError, Timeout, APIConnectionError,
+    BudgetExceededError, AuthenticationError
+)
 
 from ..models.base_models import Request, Meta, BaseModel, FullResponse
 from ..config.config import setup_caching
@@ -14,7 +17,6 @@ T = TypeVar('T', bound=BaseModel)
 
 class LiteLLMClient():
     def __init__(self, config: Request):
-
         # Initialize caching
         setup_caching()
 
@@ -42,7 +44,59 @@ class LiteLLMClient():
     def answer_model(self) -> Type[BaseModel]:
         return self._answer_model
 
-    def generate_response(self) -> Type[T]:
+    def _extract_first_json_object(self, text: str) -> Tuple[str, int, int]:
+        """Extract the first complete JSON object from text.
+
+        Args:
+            text: Text containing one or more JSON objects
+
+        Returns:
+            Tuple of (json_content, start_index, end_index)
+            If no valid JSON found, returns ("", -1, -1)
+        """
+        text = text.strip()
+        stack = []
+        in_string = False
+        escape_char = False
+        start_idx = -1
+
+        for i, char in enumerate(text):
+            # Handle string literals
+            if char == '"' and not escape_char:
+                in_string = not in_string
+            elif char == '\\' and not escape_char:
+                escape_char = True
+                continue
+
+            if not in_string:
+                if char == '{':
+                    if not stack:  # First opening brace
+                        start_idx = i
+                    stack.append(char)
+                elif char == '}':
+                    if stack and stack[-1] == '{':
+                        stack.pop()
+                        if not stack:  # Complete object found
+                            try:
+                                # Validate that this is actually valid JSON
+                                json_str = text[start_idx:i + 1]
+                                json.loads(json_str)  # Test if it's valid JSON
+                                return json_str, start_idx, i + 1
+                            except json.JSONDecodeError:
+                                # Not valid JSON, continue searching
+                                start_idx = -1
+                                continue
+
+            escape_char = False
+
+        return "", -1, -1
+
+    def generate_response(self) -> T:
+        """Generate a response using LiteLLM.
+
+        Returns:
+            An instance of the answer_model class or None if all attempts fail.
+        """
         # Create a clean copy of the request
         request_params = self.config.model_dump()
 
@@ -59,9 +113,9 @@ class LiteLLMClient():
         if not self.config.messages:
             raise ValueError("Messages are empty")
 
-        if self.config.online:
+        # Add :online to the model if it's not already there and online mode is requested
+        if self.config.online and not self.config.model.endswith(":online"):
             self.config.model = f"{self.config.model}:online"
-            # self.config.cache_prompt = False
             logger.warning("Switched to online mode")
 
         # Create metadata object to track response metrics
@@ -101,15 +155,20 @@ class LiteLLMClient():
                 # Update metadata
                 self.meta.response_time_seconds = round(response_time, 3)
                 self.meta.model_used = model
-                self.meta.cache_hit = response_time < 0.5 if self.config.cache_prompt else False
+                cache_condition = response_time < 0.5 if self.config.cache_prompt else False
+                self.meta.cache_hit = cache_condition
 
                 # Extract content from response
                 try:
-                    content_text = llm_response.choices[0].message.content
+                    # Use ANY type to handle both dict and list responses
+                    llm_resp: Any = llm_response
+                    content_text = llm_resp.choices[0].message.content
                 except Exception as e:
                     logger.warning(f"Error extracting content from response: {e}")
                     if isinstance(llm_response, dict) and "choices" in llm_response:
-                        content_text = llm_response["choices"][0].get("message", {}).get("content", "")
+                        choices = llm_response["choices"][0]
+                        message = choices.get("message", {})
+                        content_text = message.get("content", "")
                     else:
                         logger.error("No valid response content found")
                         continue
@@ -122,15 +181,17 @@ class LiteLLMClient():
 
                 # Process the content based on the requested answer model
                 try:
-                    json_content = content_text.strip()[content_text.strip().find('{'):content_text.strip().rfind('}') + 1]
-                    if not json_content:
+                    # Extract the first valid JSON object
+                    json_content, start_idx, end_idx = self._extract_first_json_object(content_text)
+
+                    if not json_content or start_idx == -1:
+                        logger.warning("No valid JSON object found in response")
+                        logger.debug(f"Raw content: {content_text}")
                         raise ValueError("No valid JSON content found", content_text)
 
-                    try:
-                        response_content = self.answer_model.model_validate_json(json_content)
-                    except Exception as e:
-                        logger.error(f"Error validating JSON content: {e}")
-                        raise ValueError("Invalid JSON content", json_content)
+                    # Validate and create a response model object
+                    model_cls = self.answer_model
+                    response_content = model_cls.model_validate_json(json_content)
 
                     # Save to log
                     if self.config.logs:
@@ -152,7 +213,7 @@ class LiteLLMClient():
                 logger.error("Authentication failed: Invalid API key.")
                 raise ValueError("Invalid API key")
             except (RateLimitError, Timeout, APIConnectionError, BudgetExceededError) as e:
-                logger.warning(f"Error with model {model}: {e}. Trying next fallback if available...")
+                logger.warning(f"Error with model {model}: {e}. Trying fallback...")
                 attempt += 1
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
@@ -160,7 +221,8 @@ class LiteLLMClient():
 
         # Calculate total time even for failed requests
         total_time = time.time() - (self.meta.request_timestamp or time.time())
-        self.meta.response_time_seconds = round(total_time, 3) if total_time > 0 else None
+        time_rounded = round(total_time, 3) if total_time > 0 else None
+        self.meta.response_time_seconds = time_rounded
 
         logger.error("All attempts failed to generate a valid response")
         return None

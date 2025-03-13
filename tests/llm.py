@@ -1,7 +1,6 @@
 from pydantic import Field
-from typing import List, Optional
-
-from src.litellm2 import Request, LiteLLMClient
+from typing import List, Optional, Any
+from litellm2 import Request, LiteLLMClient
 from drf_pydantic import BaseModel
 
 
@@ -12,49 +11,82 @@ class CustomAnswer(BaseModel):
     sentiment: Optional[str] = Field(None, description="Sentiment analysis")
 
 
-def main():
+class TextAnalyzer:
+    """Service for analyzing text using AI with structured responses."""
 
-    # Create client with default configuration and custom answer model
-    config = Request(
-        temperature=0.7,
-        max_tokens=500,
-        model="openrouter/openai/gpt-4o-mini",
-        online=False,
-        cache_prompt=True,
-        budget_limit=0.05,
-        answer_model=CustomAnswer,
-        verbose=True,
-        logs=True,
-    )
+    def __init__(self):
+        """Initialize the text analyzer with configuration."""
+        self.config = Request(
+            # Model configuration
+            model="openrouter/openai/gpt-4o-mini-2024-07-18",
+            answer_model=CustomAnswer,  # Required: Defines response structure
+            temperature=0.7,
+            max_tokens=500,
 
-    # Initialize typed client with CustomAnswer
-    client = LiteLLMClient(config)
+            # Performance features
+            online=True,              # Enable web search capability
+            cache_prompt=False,       # Disable prompt caching
+            budget_limit=0.05,        # Set maximum budget per request
 
-    # Add a message
-    client.msg.add_message_user("""
-        You are a helpful assistant that can answer questions and help with tasks.
-        You are given a question and you need to answer it.
-        You are also given a list of keywords and you need to use them to answer the question.
-        You are also given a sentiment and you need to use it to answer the question.
-        You are also given a content and you need to use it to answer the question.
-    """)
+            # Debugging options
+            verbose=True,             # Enable detailed output
+            logs=False                # Enable logging
+        )
+        self.client = LiteLLMClient(self.config)
 
-    try:
-        # Generate response
-        response: CustomAnswer = client.generate_response()
+    def analyze_text(self, text: str, data_list: Any) -> CustomAnswer:
+        """
+        Analyze the provided text and return structured insights.
 
-        # Print current response details
-        print('Meta:', client.meta.model_dump())
-        print('Request:', client.config.model_dump())
+        Args:
+            text (str): The text to analyze
 
-        if response is not None:
-            print('Response:', response.sentiment)
-        else:
-            print('Error: Failed to generate response')
+        Returns:
+            CustomAnswer: Structured analysis results
+        """
+        # Set up the conversation context
+        self.client.msg.add_message_system(
+            "You are an AI assistant that provides structured analysis with keywords and sentiment."
+        )
 
-    except Exception as e:
-        print(f'Error: {str(e)}')
+        self.client.msg.add_message_block('DATA', data_list)
+
+        # Add the text to analyze
+        self.client.msg.add_message_user(f"Analyze the following text: '{text}'")
+
+        # Generate and return structured response
+        return self.client.generate_response()
 
 
+# Example usage
 if __name__ == "__main__":
-    main()
+    # Initialize the analyzer
+    analyzer = TextAnalyzer()
+
+    data_list = [
+        {
+            "name": "John Doe",
+            "age": 30,
+            "email": "john.doe@example.com"
+        },
+        {
+            "name": "Jane Smith",
+            "age": 25,
+            "email": "jane.smith@example.com"
+        }
+    ]
+
+    result = analyzer.analyze_text("John Doe is 30 years old and works at Google.", data_list)
+
+    print('CONFIG:')
+    print(analyzer.client.config.model_dump_json(indent=2))
+
+    print('-' * 100)
+
+    print('META:')
+    print(analyzer.client.meta.model_dump_json(indent=2))
+
+    print('*' * 100)
+
+    print('RESULT:')
+    print(result.model_dump_json(indent=2))
