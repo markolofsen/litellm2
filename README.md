@@ -47,7 +47,7 @@ config = Request(
     # Performance
     online=True,                            # Enable web search
     cache_prompt=True,                      # Cache identical prompts
-    budget_limit=0.05,                      # Maximum cost per request
+    max_budget=0.05,                      # Maximum cost per request
 
     # Debug options
     verbose=True,                           # Detailed output
@@ -150,7 +150,7 @@ class TextAnalyzer:
             # Performance features
             online=True,              # Enable web search capability
             cache_prompt=False,       # Disable prompt caching
-            budget_limit=0.05,        # Set maximum budget per request
+            max_budget=0.05,        # Set maximum budget per request
 
             # Debugging options
             verbose=True,             # Enable detailed output

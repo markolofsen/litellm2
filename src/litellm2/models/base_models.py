@@ -19,10 +19,10 @@ class Request(BaseModel):
     fallbacks: Optional[List[str]] = Field(default=[], description="Fallback models in case of failure")
     stream: Optional[bool] = Field(default=False, description="Enable streaming response")
     cache_prompt: Optional[bool] = Field(default=False, description="Cache prompt for reuse")
-    budget_limit: Optional[float] = Field(None, description="Budget limit in USD for the request")
+    max_budget: Optional[float] = Field(None, description="Budget limit in USD for the request")
     answer_model: Type[BaseModel] = Field(..., description="Custom model for the answer content")
-    verbose: bool = Field(default=False, description="Enable verbose logging")
-    logs: bool = Field(default=False, description="Enable logging to file")
+    verbose: Optional[bool] = Field(default=False, description="Enable verbose logging")
+    logs: Optional[bool] = Field(default=False, description="Enable logging to file")
 
     def model_dump_json(self, **kwargs) -> str:
         data = self.model_dump()

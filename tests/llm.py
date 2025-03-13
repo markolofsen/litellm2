@@ -26,7 +26,7 @@ class TextAnalyzer:
             # Performance features
             online=True,              # Enable web search capability
             cache_prompt=False,       # Disable prompt caching
-            budget_limit=0.05,        # Set maximum budget per request
+            max_budget=0.05,        # Set maximum budget per request
 
             # Debugging options
             verbose=True,             # Enable detailed output

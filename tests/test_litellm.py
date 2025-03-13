@@ -24,7 +24,7 @@ def test_litellm_client_initialization():
         model="openrouter/openai/gpt-4o-mini",
         online=False,
         cache_prompt=True,
-        budget_limit=0.05,
+        max_budget=0.05,
         answer_model=CustomAnswer,
         verbose=True,
         logs=True,

@@ -1,6 +1,8 @@
 import time
 from typing import TypeVar, Type, Any, Tuple
 import json
+
+import litellm
 from litellm import completion
 from litellm.exceptions import (
     RateLimitError, Timeout, APIConnectionError,
@@ -36,8 +38,14 @@ class LiteLLMClient():
 
         self._answer_model = config.answer_model
 
-        # Set logging verbosity
-        logger.set_verbose(config.verbose)
+        # Set debug verbosity
+        if config.verbose:
+            logger.set_verbose(config.verbose)
+
+        litellm.logging = config.verbose
+        litellm.max_budget = config.max_budget
+        litellm.caching = config.cache_prompt
+
         logger.info("LiteLLMClient initialized")
 
     @property
